@@ -30,6 +30,10 @@
 #include "resmem.h"
 #include "resnet.h"
 #include "resproc.h"
+#include "resvm.h"
+#include "stat.h"
+#include "rescpu.h"
+#include "resfs.h"
 
 /* Allocate memory for bulk resource information and initiate it
  * properly.
@@ -65,7 +69,6 @@ res_blk_t *res_build_blk(int *res_ids, int res_count)
 			return NULL;
 		}
 		memset(temp, 0, sizeof(res_unit_t));
-		temp->status = RES_STATUS_EMPTY;
 
 		/* Some resource information are big and need extra allocation.
 		 * In these cases an address is returned which hold actual
@@ -162,7 +165,7 @@ void res_destroy_blk(res_blk_t *res)
 /* read resource information corresponding to res_id, out should have been
  * properly allocated by caller if required.
  */
-int res_read(int res_id, void *out, size_t out_sz, void *hint, int pid, int flags)
+int res_read(int res_id, void *out, size_t out_sz, void **hint, int pid, int flags)
 {
 	if (out == NULL) {
 		switch (res_id) {
@@ -171,6 +174,9 @@ int res_read(int res_id, void *out, size_t out_sz, void *hint, int pid, int flag
 		 * So out can be NULL in that case.
 		 */
 		case RES_NET_ALLIFSTAT:
+		case RES_NET_ROUTE_ALL:
+		case RES_NET_ARP_ALL:
+		case RES_NET_DEV_ALL:
 			break;
 
 		default:
@@ -183,14 +189,51 @@ int res_read(int res_id, void *out, size_t out_sz, void *hint, int pid, int flag
 	if (res_id >= PROC_MIN && res_id < PROC_MAX)
 		return getprocinfo(res_id, out, out_sz, hint, pid, flags);
 
-	/* Check if memory proc file is needed to open */
-	if (res_id >= MEM_MIN && res_id < MEM_MAX)
-		return getmeminfo(res_id, out, out_sz, hint, pid, flags);
+	if (res_id >= MEM_MIN && res_id < MEM_MAX) {
+		if (pid > 0) {
+			return getmeminfo_cg(res_id, out, out_sz, hint,
+					     pid, flags);
+		} else {
+			return getmeminfo(res_id, out, out_sz, hint,
+					  pid, flags);
+		}
+	}
 
-	/* Check if net proc file is needed to open */
-	if (res_id >= NET_MIN && res_id < NET_MAX)
+	if (res_id >= RES_NET_MIN && res_id < RES_NET_MAX)
 		return getnetinfo(res_id, out, out_sz, hint, pid, flags);
 
+	if (res_id >= VM_MIN && res_id < VM_MAX)
+		return getvmstatinfo(res_id, out, out_sz, hint, flags);
+
+	if (res_id >= CPU_MIN && res_id < CPU_MAX)
+		return getcpuinfo(res_id, out, out_sz, hint, flags);
+
+	if (res_id >= ROUTE_MIN && res_id < ROUTE_MAX)
+		return getrouteinfo(res_id, out, out_sz, hint, flags);
+
+	if (res_id >= ARP_MIN && res_id < ARP_MAX)
+		return getarpinfo(res_id, out, out_sz, hint, flags);
+
+	if (res_id >= DEV_MIN && res_id < DEV_MAX)
+		return getdevinfo(res_id, out, out_sz, hint, flags);
+
+	if (res_id >= STAT_MIN && res_id < STAT_MAX)
+		return getstatinfo(res_id, out, out_sz, hint, flags);
+
+	if (res_id >= FS_MIN && res_id < FS_MAX)
+		return getfsinfo(res_id, out, out_sz, hint, flags);
+
+	return 0;
+}
+
+int res_exist(int res_id, void *out, size_t out_sz, void *hint, int pid, int flags)
+{
+	if (res_id >= VM_MIN && res_id < VM_MAX)
+		return getvmexist(res_id, out, out_sz, hint, flags);
+	if (res_id >= MEM_MIN && res_id < MEM_MAX)
+		return getmemexist(res_id, out, out_sz, hint, flags);
+	if (res_id >= CPU_MIN && res_id < CPU_MAX)
+		return getcpuexist(res_id, out, out_sz, hint, flags);
 	return 0;
 }
 
@@ -228,7 +271,7 @@ int res_read_blk(res_blk_t *res, int pid, int flags)
 				res->res_unit[i]->status = ENOMEM;
 			} else {
 				(res->res_unit[i]->data).sz = sysconf(_SC_PAGESIZE);
-				res->res_unit[i]->status = RES_STATUS_FILLED;
+				res->res_unit[i]->status = 0;
 			}
 			break;
 
@@ -241,7 +284,7 @@ int res_read_blk(res_blk_t *res, int pid, int flags)
 				len = sizeof(union r_data);
 				strncpy(out, t.release, len-1);
 				out[len-1] = '\0';
-				res->res_unit[i]->status = RES_STATUS_FILLED;
+				res->res_unit[i]->status = 0;
 			}
 			break;
 
@@ -256,7 +299,7 @@ int res_read_blk(res_blk_t *res, int pid, int flags)
 				len = sizeof(union r_data);
 				strncpy(out, rawdata, len-1);
 				out[len-1] = '\0';
-				res->res_unit[i]->status = RES_STATUS_FILLED;
+				res->res_unit[i]->status = 0;
 			}
 			break;
 
@@ -268,14 +311,19 @@ int res_read_blk(res_blk_t *res, int pid, int flags)
 			isprocreq = 1;
 
 		default:
-			res->res_unit[i]->status = RES_STATUS_NOTSUPPORTED;
+			res->res_unit[i]->status = -1;
 		}
 	}
 
 	if (isprocreq)
 		populate_procinfo(res, pid, flags);
-	if (ismeminforeq)
-		populate_meminfo(res, pid, flags);
+	if (ismeminforeq) {
+		if (pid > 0) {
+			return (populate_meminfo_cg(res, pid, flags));
+		} else {
+			return (populate_meminfo(res, pid, flags));
+		}
+	}
 
 	if (isnetdevreq)
 		populate_netinfo(res, pid, flags);

@@ -253,20 +253,49 @@ int getnetinfo(int res_id, void *out, size_t sz, void *hint, int pid, int flags)
 {
 	char buf[NETBUF_1024];
 	FILE *fp;
-	int err = 0;
+	int err = 0, ret;
 	char ifname[IFNAMSIZ];
 	int ver = 0;
 	char *p;
-
-#define CHECK_SIZE(sz, req_sz)						\
-	if (sz < req_sz) {						\
-		eprintf("memory (%ld) is not enough to hold data (%ld)",\
-			sz, req_sz);					\
-		errno = ENOMEM;						\
-		return -1;						\
-	}
+	char buffer[4096];
+	unsigned long long *n = (unsigned long long *) out;
 
 	switch (res_id) {
+	case RES_NET_IP_LOCAL_PORT_RANGE:
+		ret = file_to_buf(IP_PORT_RANGE, buffer, sizeof(buffer));
+		if (ret < 0)
+			return ret;
+		sscanf(buffer, "%Lu %Lu", &n[0], &n[1]);
+		break;
+
+	case RES_NET_TCP_RMEM_MAX:
+		ret = file_to_buf(TCP_RMEM_MAX, buffer, sizeof(buffer));
+		if (ret < 0)
+			return ret;
+		sscanf(buffer, "%Lu %Lu %Lu", &n[0], &n[1], &n[2]);
+		break;
+
+	case RES_NET_TCP_WMEM_MAX:
+		ret = file_to_buf(TCP_WMEM_MAX, buffer, sizeof(buffer));
+		if (ret < 0)
+			return ret;
+		sscanf(buffer, "%Lu %Lu %Lu", &n[0], &n[1], &n[2]);
+		break;
+
+	case RES_NET_RMEM_MAX:
+		ret = file_to_buf(CORE_RMEM_MAX, buffer, sizeof(buffer));
+		if (ret < 0)
+			return ret;
+		sscanf(buffer, "%Lu", n);
+		break;
+
+	case RES_NET_WMEM_MAX:
+		ret = file_to_buf(CORE_WMEM_MAX, buffer, sizeof(buffer));
+		if (ret < 0)
+			return ret;
+		sscanf(buffer, "%Lu", n);
+		break;
+
 	case RES_NET_IFSTAT:
 		CHECK_SIZE(sz, sizeof(res_net_ifstat_t));
 
@@ -349,8 +378,9 @@ int populate_netinfo(res_blk_t *res, int pid, int flags)
 				res->res_unit[i]->data_sz,
 				res->res_unit[i]->hint, 0, 0) == -1) {
 				res->res_unit[i]->status = errno;
-			} else
-				res->res_unit[i]->status = RES_STATUS_FILLED;
+			} else {
+				res->res_unit[i]->status = 0;
+			}
 			break;
 		case RES_NET_ALLIFSTAT:
 			/* Currently we don't support RES_NET_ALLIFSTAT with
@@ -362,7 +392,7 @@ int populate_netinfo(res_blk_t *res, int pid, int flags)
 				&(res->res_unit[i]->hint), 0, 0) == -1) {
 				res->res_unit[i]->status = errno;
 			} else {
-				res->res_unit[i]->status = RES_STATUS_FILLED;
+				res->res_unit[i]->status = 0;
 				res->res_unit[i]->data.ptr = p;
 			}
 			break;

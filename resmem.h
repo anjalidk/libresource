@@ -20,7 +20,6 @@
 #define _RESMEM_H
 
 #define MEMINFO_FILE "/proc/meminfo"
-#define VMINFO_FILE "/proc/vmstat"
 
 #define MEMBUF_8	8
 #define MEMBUF_128	128
@@ -29,7 +28,13 @@
 #define MEMCGNAME	"memory"
 
 extern int populate_meminfo(struct res_blk *res, int pid, int flags);
+extern int populate_meminfo_cg(res_blk_t *res, int pid, int flags);
 extern int getmeminfo(int res_id, void *out, size_t sz,
-		void *hint, int pid, int flags);
+		void **hint, int pid, int flags);
+extern int getmeminfo_cg(int res_id, void *out, size_t sz,
+		void **hint, int pid, int flags);
+extern int getmemexist(int res_id, void *exist, size_t sz, void *hint,
+		int flags);
+extern int get_info_infile(char *fname, char *res, void *out);
 
 #endif /* _RESMEM_H */
